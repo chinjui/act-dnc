@@ -1,8 +1,8 @@
 import tensorflow as tf
 import tensorflow.contrib.rnn as rnn
 
-from tensorflow.contrib.rnn.python.ops.core_rnn_cell_impl import _linear
-from tensorflow.contrib.rnn.python.ops.core_rnn_cell_impl import _checked_scope
+# from tensorflow.contrib.rnn.python.ops.core_rnn_cel_impl import _linear
+# from tensorflow.contrib.rnn.python.ops.core_rnn_cell_impl import _checked_scope
 
 
 class ACTWrapper(rnn.RNNCell):
@@ -53,7 +53,8 @@ class ACTWrapper(rnn.RNNCell):
         return self._ponder_cost_op
 
     def __call__(self, inputs, state, scope=None):
-        with _checked_scope(self, scope or "act_wrapper", reuse=self._reuse):
+        # with _checked_scope(self, scope or "act_wrapper", reuse=self._reuse):
+        with tf.variable_scope(scope or "act_wrapper", reuse=self._reuse):
             batch_size = tf.shape(inputs)[0]
             if isinstance(state, tuple):
                 state_is_tuple = True
@@ -82,9 +83,13 @@ class ACTWrapper(rnn.RNNCell):
                 else:
                     joint_current_state = current_state
 
-                current_h = tf.nn.sigmoid(tf.squeeze(
-                    _linear([joint_current_state], 1, True, self._init_halting_bias), 1
-                ))
+                # current_h = tf.nn.sigmoid(tf.squeeze(
+                #     _linear([joint_current_state], 1, True, self._init_halting_bias), 1
+                # ))
+                current_h = tf.squeeze(tf.layers.dense(joint_current_state,
+                                                       units=1,
+                                                       activation=tf.sigmoid),
+                                       axis=1)
 
                 current_h_sum = running_p_sum + current_h
 
