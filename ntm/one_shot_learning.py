@@ -15,7 +15,7 @@ def main():
     parser.add_argument('--n_classes', default=5)
     parser.add_argument('--seq_length', default=50)
     parser.add_argument('--augment', default=True)
-    parser.add_argument('--model', default="MANN", help='LSTM, MANN, MANN2 or NTM')
+    parser.add_argument('--model', default="LSTM", help='LSTM, MANN, MANN2 or NTM')
     parser.add_argument('--read_head_num', default=4)
     parser.add_argument('--batch_size', default=16)
     parser.add_argument('--num_epoches', default=100000)
@@ -47,7 +47,9 @@ def train(args):
         n_train_classses=args.n_train_classes,
         n_test_classes=args.n_test_classes
     )
-    with tf.Session() as sess:
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    with tf.Session(config=config) as sess:
         if args.debug:
             sess = tf_debug.LocalCLIDebugWrapperSession(sess)
         if args.restore_training:

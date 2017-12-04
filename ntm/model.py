@@ -86,6 +86,11 @@ class NTMOneShotLearningModel():
             import ntm.mann_cell_2 as mann_cell
             cell = mann_cell.MANNCell(args.rnn_size, args.memory_size, args.memory_vector_dim,
                                     head_num=args.read_head_num)
+        elif args.model == 'ACT':
+            from ..tf_rnn_adaptive.act_wrapper import ACTWrapper
+            print("Imported" + "!" * 20)
+        else:
+            raise Exception('Unknown model: `{}`'.format(args.model))
 
         state = cell.zero_state(args.batch_size, tf.float32)
         self.state_list = [state]   # For debugging
