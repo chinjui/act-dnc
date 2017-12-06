@@ -36,6 +36,7 @@ class ACTWrapper(rnn.RNNCell):
             stacked_steps = tf.stack(self._ponder_steps)
             if sequence_length is not None:
                 mask = tf.sequence_mask(sequence_length, len(self._remainders))
+                mask = tf.expand_dims(mask, axis=0) # to correct inconsistency between 2 act model
                 stacked_steps *= tf.transpose(tf.cast(mask, stacked_steps.dtype))
             self._ponder_steps_op = stacked_steps
         return self._ponder_steps_op
@@ -47,6 +48,7 @@ class ACTWrapper(rnn.RNNCell):
             stacked_remainders = tf.stack(self._remainders)
             if sequence_length is not None:
                 mask = tf.sequence_mask(sequence_length, len(self._remainders))
+                mask = tf.expand_dims(mask, axis=0) # to correct inconsistency between 2 act model
                 stacked_remainders *= tf.transpose(tf.cast(mask, stacked_remainders.dtype))
             batch_size = tf.cast(tf.shape(self._remainders[0])[0], stacked_remainders.dtype)
             self._ponder_cost_op = tf.reduce_sum(stacked_remainders) / batch_size
@@ -65,8 +67,8 @@ class ACTWrapper(rnn.RNNCell):
 
             inputs_and_zero = tf.concat([inputs, tf.fill([batch_size, 1], 0.0)], 1)
             inputs_and_one = tf.concat([inputs, tf.fill([batch_size, 1], 1.0)], 1)
-            zero_state = tf.convert_to_tensor(self._cell.zero_state(batch_size, state.dtype))
-            zero_output = tf.fill([batch_size, self._cell.output_size], tf.constant(0.0, state.dtype))
+            zero_state = tf.convert_to_tensor(self._cell.zero_state(batch_size, state[0].dtype))
+            zero_output = tf.fill([batch_size, self._cell.output_size], tf.constant(0.0, state[0].dtype))
 
             def cond(finished, *_):
                 return tf.reduce_any(tf.logical_not(finished))
@@ -77,8 +79,10 @@ class ACTWrapper(rnn.RNNCell):
 
                 current_inputs = tf.where(tf.equal(time_step, 1), inputs_and_one, inputs_and_zero)
                 current_output, current_state = self._cell(current_inputs, previous_state)
-
                 if state_is_tuple:
+                    # current_state_cat = tf.unstack(current_state)
+                    # current_state_cat = tf.unstack(current_state_cat[0])
+                    # joint_current_state = tf.concat(current_state_cat, 1)
                     joint_current_state = tf.concat(current_state, 1)
                 else:
                     joint_current_state = current_state
@@ -86,10 +90,17 @@ class ACTWrapper(rnn.RNNCell):
                 # current_h = tf.nn.sigmoid(tf.squeeze(
                 #     _linear([joint_current_state], 1, True, self._init_halting_bias), 1
                 # ))
-                current_h = tf.squeeze(tf.layers.dense(joint_current_state,
-                                                       units=1,
-                                                       activation=tf.sigmoid),
-                                       axis=1)
+                try:
+                    current_h = tf.squeeze(tf.layers.dense(joint_current_state,
+                                                           units=1,
+                                                           activation=tf.sigmoid),
+                                           axis=1)
+                except ValueError:
+                    current_h = tf.squeeze(tf.layers.dense(joint_current_state,
+                                                           units=1,
+                                                           activation=tf.sigmoid,
+                                                           reuse=True),
+                                           axis=1)
 
                 current_h_sum = running_p_sum + current_h
 
@@ -121,6 +132,12 @@ class ACTWrapper(rnn.RNNCell):
                     tf.fill([batch_size], False), tf.constant(1), state, zero_output, zero_state,
                     tf.fill([batch_size], 0), tf.fill([batch_size], 0.0), tf.fill([batch_size], 0.0)
                 ])
+            # all_ponder_steps = tf.Print(
+            #         all_ponder_steps,
+            #         data=[all_ponder_steps],
+            #         message="ponder_steps: ",
+            #         summarize=256)
+
 
             if state_is_tuple:
                 final_state = state_tuple_type(

@@ -9,7 +9,7 @@ from tensorflow.python import debug as tf_debug
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', default="train")
-    parser.add_argument('--restore_training', default=False)
+    parser.add_argument('--restore_training', action='store_true')
     parser.add_argument('--debug', default=False)
     parser.add_argument('--label_type', default="one_hot", help='one_hot or five_hot')
     parser.add_argument('--n_classes', default=5)
@@ -61,7 +61,7 @@ def train(args):
             tf.global_variables_initializer().run()
         train_writer = tf.summary.FileWriter(args.tensorboard_dir + '/' + args.model, sess.graph)
         print(args)
-        print("1st\t2nd\t3rd\t4th\t5th\t6th\t7th\t8th\t9th\t10th\tbatch\tloss")
+        print("1st\t2nd\t3rd\t4th\t5th\t6th\t7th\t8th\t9th\t10th\tbatch\tloss\tponder")
         for b in range(args.num_epoches):
 
             # Test
@@ -72,7 +72,7 @@ def train(args):
                                                               augment=args.augment,
                                                               label_type=args.label_type)
                 feed_dict = {model.x_image: x_image, model.x_label: x_label, model.y: y}
-                output, learning_loss = sess.run([model.o, model.learning_loss], feed_dict=feed_dict)
+                output, learning_loss, ponder_steps = sess.run([model.o, model.learning_loss, model.mean_ponder_steps], feed_dict=feed_dict)
                 merged_summary = sess.run(model.learning_loss_summary, feed_dict=feed_dict)
                 train_writer.add_summary(merged_summary, b)
                 # state_list = sess.run(model.state_list, feed_dict=feed_dict)  # For debugging
@@ -81,7 +81,7 @@ def train(args):
                 accuracy = test_f(args, y, output)
                 for accu in accuracy:
                     print('%.4f' % accu, end='\t')
-                print('%d\t%.4f' % (b, learning_loss))
+                print('%d\t%.3f\t%.2f' % (b, learning_loss, ponder_steps))
 
             # Save model
 

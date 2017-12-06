@@ -87,8 +87,12 @@ class NTMOneShotLearningModel():
             cell = mann_cell.MANNCell(args.rnn_size, args.memory_size, args.memory_vector_dim,
                                     head_num=args.read_head_num)
         elif args.model == 'ACT':
-            from ..tf_rnn_adaptive.act_wrapper import ACTWrapper
-            print("Imported" + "!" * 20)
+            from tf_rnn_adaptive.act_wrapper import ACTWrapper
+            def rnn_cell(rnn_size):
+                return tf.nn.rnn_cell.BasicLSTMCell(rnn_size)
+            # inner_cell = tf.nn.rnn_cell.MultiRNNCell([rnn_cell(args.rnn_size) for _ in range(args.rnn_num_layers)])
+            inner_cell = rnn_cell(args.rnn_size)
+            cell = ACTWrapper(inner_cell, ponder_limit=10)
         else:
             raise Exception('Unknown model: `{}`'.format(args.model))
 
@@ -126,6 +130,14 @@ class NTMOneShotLearningModel():
             )
         self.o = tf.reshape(self.o, shape=[args.batch_size, args.seq_length, -1])
         self.learning_loss_summary = tf.summary.scalar('learning_loss', self.learning_loss)
+
+        """ ponder loss """
+        if args.model == 'ACT':
+            time_penalty = 0.001
+            self._ponder_loss = time_penalty * cell.get_ponder_cost(args.seq_length)
+            self.learning_loss += self._ponder_loss
+            self.ponder_steps = cell.get_ponder_steps(args.seq_length)
+            self.mean_ponder_steps = tf.reduce_mean(self.ponder_steps)
 
         with tf.variable_scope('optimizer'):
             self.optimizer = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
