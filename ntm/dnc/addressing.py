@@ -22,7 +22,7 @@ import collections
 import sonnet as snt
 import tensorflow as tf
 
-import util
+from . import util
 
 # Ensure values are greater than epsilon to avoid numerical instability.
 _EPSILON = 1e-6
@@ -211,6 +211,7 @@ class TemporalLinkage(snt.RNNCore):
       link = prev_link_scale * prev_link + new_link
       # Return the link with the diagonal set to zero, to remove self-looping
       # edges.
+      # tf.zeros([16, self._num_writes, self._memory_size], dtype=link.dtype)
       return tf.matrix_set_diag(
           link,
           tf.zeros(

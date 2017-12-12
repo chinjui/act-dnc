@@ -12,28 +12,36 @@ def main():
     parser.add_argument('--restore_training', action='store_true')
     parser.add_argument('--debug', default=False)
     parser.add_argument('--label_type', default="one_hot", help='one_hot or five_hot')
-    parser.add_argument('--n_classes', default=5)
-    parser.add_argument('--seq_length', default=50)
+    parser.add_argument('--n_classes', default=5, type=int)
+    parser.add_argument('--seq_length', default=50, type=int)
     parser.add_argument('--augment', default=True)
     parser.add_argument('--model', default="LSTM", help='LSTM, MANN, MANN2 or NTM')
     parser.add_argument('--read_head_num', default=4)
     parser.add_argument('--batch_size', default=16)
-    parser.add_argument('--num_epoches', default=100000)
+    parser.add_argument('--num_epoches', default=100000, type=int)
     parser.add_argument('--learning_rate', default=1e-3)
     parser.add_argument('--rnn_size', default=200)
     parser.add_argument('--image_width', default=20)
     parser.add_argument('--image_height', default=20)
     parser.add_argument('--rnn_num_layers', default=1)
-    parser.add_argument('--memory_size', default=128)
+    parser.add_argument('--memory_size', default=128, type=int)
     parser.add_argument('--memory_vector_dim', default=40)
     parser.add_argument('--shift_range', default=1, help='Only for model=NTM')
     parser.add_argument('--write_head_num', default=1, help='Only for model=NTM. For MANN #(write_head) = #(read_head)')
     parser.add_argument('--test_batch_num', default=100)
     parser.add_argument('--n_train_classes', default=1200)
     parser.add_argument('--n_test_classes', default=423)
+    parser.add_argument('--clip_value', default=10)
     parser.add_argument('--save_dir', default='./save/one_shot_learning')
     parser.add_argument('--tensorboard_dir', default='./summary/one_shot_learning')
     args = parser.parse_args()
+
+    global ckpt
+    model_name = args.model + '-MemorySize' + str(args.memory_size)
+    ckpt = tf.train.get_checkpoint_state(args.save_dir + '/' + model_name)
+    if args.restore_training:
+        print("Restore model from: {}".format(ckpt.model_checkpoint_path))
+
     if args.mode == 'train':
         train(args)
     elif args.mode == 'test':
@@ -54,7 +62,6 @@ def train(args):
             sess = tf_debug.LocalCLIDebugWrapperSession(sess)
         if args.restore_training:
             saver = tf.train.Saver()
-            ckpt = tf.train.get_checkpoint_state(args.save_dir + '/' + args.model)
             saver.restore(sess, ckpt.model_checkpoint_path)
         else:
             saver = tf.train.Saver(tf.global_variables())
@@ -106,7 +113,6 @@ def test(args):
         n_test_classes=args.n_test_classes
     )
     saver = tf.train.Saver()
-    ckpt = tf.train.get_checkpoint_state(args.save_dir + '/' + args.model)
     with tf.Session() as sess:
         saver.restore(sess, ckpt.model_checkpoint_path)
         print("Test Result\n1st\t2nd\t3rd\t4th\t5th\t6th\t7th\t8th\t9th\t10th\tloss")
