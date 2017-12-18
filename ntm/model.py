@@ -93,6 +93,19 @@ class NTMOneShotLearningModel():
             # inner_cell = tf.nn.rnn_cell.MultiRNNCell([rnn_cell(args.rnn_size) for _ in range(args.rnn_num_layers)])
             inner_cell = rnn_cell(args.rnn_size)
             cell = ACTWrapper(inner_cell, ponder_limit=10)
+        elif args.model == 'DNC':
+            from dnc import dnc
+            access_config = {
+                "memory_size": args.memory_size,
+                "word_size": args.memory_vector_dim,
+                "num_reads": args.read_head_num,
+                "num_writes": args.write_head_num,
+            }
+            controller_config = {
+                "hidden_size": args.rnn_size,
+            }
+            clip_value = args.clip_value
+            cell = dnc.DNC(access_config, controller_config, args.output_dim, clip_value)
         elif args.model == 'ACT-DNC':
             from tf_rnn_adaptive.act_wrapper import ACTWrapper
             from dnc import dnc
@@ -109,11 +122,50 @@ class NTMOneShotLearningModel():
 
             dnc_core = dnc.DNC(access_config, controller_config, args.output_dim, clip_value)
             cell = ACTWrapper(dnc_core, ponder_limit=10)
+        elif args.model == 'MY-ACT':
+            from my_act.act_wrapper import ACTWrapper
+            from dnc import dnc
+
+            # main dnc
+            access_config = {
+                "memory_size": args.memory_size,
+                "word_size": args.memory_vector_dim,
+                "num_reads": args.read_head_num,
+                "num_writes": args.write_head_num,
+            }
+            controller_config = {
+                "hidden_size": args.rnn_size,
+            }
+            clip_value = args.clip_value
+            main_dnc = dnc.DNC(access_config, controller_config, args.output_dim, clip_value)
+
+            # auxiliary dnc
+            # use memory_vector_dim as aux's output size
+            # so that info does not lose when communicating with main dnc
+            aux_access_config = {
+                "memory_size": 8,
+                "word_size": args.memory_vector_dim,
+                "num_reads": 1,
+                "num_writes": 1
+            }
+            aux_controller_config = {
+                "hidden_size": args.rnn_size,
+            }
+            aux_dnc = dnc.DNC(aux_access_config,
+                              aux_controller_config,
+                              args.memory_vector_dim,
+                              clip_value)
+
+            cell = ACTWrapper(main_dnc, aux_dnc, ponder_limit=10)
         else:
             raise Exception('Unknown model: `{}`'.format(args.model))
 
-        if 'DNC' in args.model:
+        if args.model == 'ACT-DNC':
             state = dnc_core.initial_state(args.batch_size)
+        elif args.model == 'DNC':
+            state = cell.initial_state(args.batch_size)
+        elif args.model == 'MY-ACT':
+            state = main_dnc.initial_state(args.batch_size)
         else:
             state = cell.zero_state(args.batch_size, tf.float32)
         self.state_list = [state]   # For debugging

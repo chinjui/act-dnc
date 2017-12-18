@@ -1,10 +1,14 @@
 import tensorflow as tf
 import tensorflow.contrib.rnn as rnn
 from dnc import dnc
+from dnc.access import AccessState
+from dnc.dnc import DNCState
 from tensorflow.python.util import nest
+import sonnet as snt
 
 # from tensorflow.contrib.rnn.python.ops.core_rnn_cel_impl import _linear
 # from tensorflow.contrib.rnn.python.ops.core_rnn_cell_impl import _checked_scope
+batch_flatten = snt.BatchFlatten()
 
 def choose_dnc_state(cond, s1, s2, structure):
     s1_flat = nest.flatten(s1)
@@ -14,11 +18,83 @@ def choose_dnc_state(cond, s1, s2, structure):
     return nest.pack_sequence_as(structure=structure,
                                  flat_sequence=output_flat)
 
+def dnc_read(inputs, aux_output, cell, previous_state):
+    """
+    main_dnc: read
+
+    Args:
+        inputs: [x, prev_read, aux_output or 0s]
+        cell: main_dnc cell
+        previous_state: previous main_dnc state
+
+    Returns:
+        read words: read vectors from memory
+        state
+    """
+
+    with tf.variable_scope(tf.get_variable_scope(), reuse=tf.AUTO_REUSE):
+        # TODO remember to use new controller state at next time step
+        # previous states
+        prev_access_output = previous_state.access_output
+        prev_access_state = previous_state.access_state
+        prev_controller_state = previous_state.controller_state
+
+        # append prev_access_output to inputs, and build controller
+        batch_flatten = snt.BatchFlatten()
+        inputs = tf.concat(
+                [batch_flatten(inputs), batch_flatten(aux_output), batch_flatten(prev_access_output)], 1)
+        controller_output, controller_state = cell._controller(
+                batch_flatten(inputs), prev_controller_state)
+
+        # clip controller output
+        controller_output = cell._clip_if_enabled(controller_output)
+        controller_state = snt.nest.map(cell._clip_if_enabled, controller_state)
+
+        # update usage without updating `linkage`
+        access_inputs = cell._access._read_inputs(controller_output)
+        usage = cell._access._freeness(
+                write_weights=prev_access_state.write_weights,
+                free_gate=access_inputs['free_gate'],
+                read_weights=prev_access_state.read_weights,
+                prev_usage=prev_access_state.usage)
+
+        # erase memory
+        write_weights = cell._access._write_weights(access_inputs, prev_access_state.memory,
+                usage)
+        expand_address = tf.expand_dims(write_weights, 3)
+        reset_weights = tf.expand_dims(access_inputs['erase_vectors'], 2)
+        weighted_resets = expand_address * reset_weights
+        reset_gate = tf.reduce_prod(1 - weighted_resets, [1])
+        memory = prev_access_state.memory * reset_gate
+
+        # read from memory
+        read_weights = cell._access._read_weights(
+                access_inputs,
+                memory=memory, # prev_access_state.memory,
+                prev_read_weights=prev_access_state.read_weights,
+                link=prev_access_state.linkage.link)
+        read_words = tf.matmul(read_weights, memory)
+
+        # dnc & access state after read
+        access_state = AccessState(
+                memory=memory, # prev_access_state.memory,
+                read_weights=read_weights,
+                write_weights=write_weights,
+                linkage=prev_access_state.linkage,
+                usage=usage)
+
+    return read_words, DNCState(
+            access_output=read_words,
+            access_state=access_state,
+            controller_state=controller_state)
+
+
 class ACTWrapper(rnn.RNNCell):
     """Adaptive Computation Time wrapper (based on https://arxiv.org/abs/1603.08983)"""
 
-    def __init__(self, cell, ponder_limit=100, epsilon=0.01, init_halting_bias=1.0, reuse=None):
-        self._cell = cell
+    def __init__(self, main_dnc, aux_dnc, ponder_limit=100, epsilon=0.01, init_halting_bias=1.0, reuse=None):
+        self._main_dnc = main_dnc
+        self._aux_dnc = aux_dnc
         self._ponder_limit = ponder_limit
         self._epsilon = epsilon
         self._init_halting_bias = init_halting_bias
@@ -32,11 +108,12 @@ class ACTWrapper(rnn.RNNCell):
 
     @property
     def state_size(self):
-        return self._cell.state_size
+        return (self._main_dnc.state_size,
+                self._aux_dnc.state_size)
 
     @property
     def output_size(self):
-        return self._cell.output_size
+        return self._main_dnc.output_size
 
     def get_ponder_steps(self, sequence_length=None):
         if len(self._ponder_steps) == 0:
@@ -78,32 +155,31 @@ class ACTWrapper(rnn.RNNCell):
             inputs_and_zero = tf.concat([inputs, tf.fill([batch_size, 1], 0.0)], 1)
             inputs_and_one = tf.concat([inputs, tf.fill([batch_size, 1], 1.0)], 1)
             # zero_state = tf.convert_to_tensor(self._cell.zero_state(batch_size, state[0].dtype))
-            if isinstance(self._cell, dnc.DNC):
-                zero_state = self._cell.initial_state(batch_size)
-            else:
-                zero_state = self._cell.zero_state(batch_size, state[0].dtype)
-            zero_output = tf.fill([batch_size, self._cell.output_size[0]], tf.constant(0.0, state[0].dtype))
+            # if isinstance(self._cell, dnc.DNC):
+            #     zero_state = self._cell.initial_state(batch_size)
+            # else:
+            #     zero_state = self._cell.zero_state(batch_size, state[0].dtype)
+            main_zero_state = self._main_dnc.initial_state(batch_size)
+            aux_zero_state = self._aux_dnc.initial_state(batch_size)
+            main_zero_output = tf.fill([batch_size, self._main_dnc.output_size[0]], tf.constant(0.0, tf.float32))
+            aux_zero_output = tf.fill([batch_size, self._aux_dnc.output_size[0]], tf.constant(0.0, tf.float32))
 
             def cond(finished, *_):
                 return tf.reduce_any(tf.logical_not(finished))
 
             def body(previous_finished, time_step,
                      previous_state, running_output, running_state,
-                     ponder_steps, remainders, running_p_sum):
+                     ponder_steps, remainders, running_p_sum, prev_aux_output, prev_aux_state):
 
                 current_inputs = tf.where(tf.equal(time_step, 1), inputs_and_one, inputs_and_zero)
-                current_output, current_state = self._cell(current_inputs, previous_state)
+                # current_output, current_state = self._cell(current_inputs, previous_state)
+                read_words, main_current_state = dnc_read(current_inputs, aux_zero_output, self._main_dnc, previous_state)
+                aux_inputs = tf.concat(
+                        [batch_flatten(current_inputs), batch_flatten(read_words)], 1)
+                aux_current_output, aux_current_state = self._aux_dnc(aux_inputs, prev_aux_state)
 
-                if isinstance(self._cell, dnc.DNC):
-                    joint_current_state = tf.concat(current_state.controller_state, 1)
-                else:
-                    if state_is_tuple:
-                        # current_state_cat = tf.unstack(current_state)
-                        # current_state_cat = tf.unstack(current_state_cat[0])
-                        # joint_current_state = tf.concat(current_state_cat, 1)
-                        joint_current_state = tf.concat(current_state, 1)
-                    else:
-                        joint_current_state = current_state
+                # TODO
+                joint_current_state = tf.concat(aux_current_state.controller_state, 1)
 
                 # current_h = tf.nn.sigmoid(tf.squeeze(
                 #     _linear([joint_current_state], 1, True, self._init_halting_bias), 1
@@ -130,37 +206,31 @@ class ACTWrapper(rnn.RNNCell):
                 current_p = tf.where(current_finished, 1.0 - running_p_sum, current_h)
                 expanded_current_p = tf.expand_dims(current_p, 1)
 
-                running_output += expanded_current_p * current_output
+                running_output += expanded_current_p # * read_words # of no use
 
-                if isinstance(self._cell, dnc.DNC):
-                    running_state = choose_dnc_state(previous_finished, running_state, current_state, self._cell._state_size)
-                else:
-                    if state_is_tuple:
-                        running_state += tf.expand_dims(expanded_current_p, 0) * current_state
-                    else:
-                        running_state += expanded_current_p * current_state
+                running_state = choose_dnc_state(previous_finished, running_state, main_current_state, self._main_dnc._state_size)
 
                 ponder_steps = tf.where(just_finished, tf.fill([batch_size], time_step), ponder_steps)
                 remainders = tf.where(just_finished, current_p, remainders)
                 running_p_sum += current_p
 
                 return (current_finished, time_step + 1,
-                        current_state, running_output, running_state,
-                        ponder_steps, remainders, running_p_sum)
-            _, _, _, final_output, final_state, all_ponder_steps, all_remainders, _ = \
+                        main_current_state, running_output, running_state,
+                        ponder_steps, remainders, running_p_sum,
+                        aux_current_output, aux_current_state)
+            _, _, _, final_output, final_state, all_ponder_steps, all_remainders, _, aux_output, aux_state = \
                 tf.while_loop(cond, body, [
-                    tf.fill([batch_size], False), tf.constant(1), state, zero_output, zero_state,
-                    tf.fill([batch_size], 0), tf.fill([batch_size], 0.0), tf.fill([batch_size], 0.0)
-                ])
+                    tf.fill([batch_size], False), tf.constant(1), state, main_zero_output, main_zero_state,
+                    tf.fill([batch_size], 0), tf.fill([batch_size], 0.0), tf.fill([batch_size], 0.0),
+                    aux_zero_output, aux_zero_state])
             # all_ponder_steps = tf.Print(
             #         all_ponder_steps,
             #         data=[all_ponder_steps],
             #         message="ponder_steps: ",
             #         summarize=256)
-            if state_is_tuple and not isinstance(self._cell, dnc.DNC):
-                final_state = state_tuple_type(
-                    *tf.unstack(final_state)
-                )
+            inputs_and_one = tf.concat([inputs, tf.fill([batch_size, 1], 1.0)], 1)
+            main_inputs = tf.concat([inputs_and_one, batch_flatten(aux_output)], 1)
+            final_output, final_state = self._main_dnc(main_inputs, final_state)
 
             self._ponder_steps.append(all_ponder_steps)
             self._remainders.append(all_remainders)

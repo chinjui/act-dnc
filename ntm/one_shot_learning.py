@@ -19,7 +19,7 @@ def main():
     parser.add_argument('--read_head_num', default=4)
     parser.add_argument('--batch_size', default=16)
     parser.add_argument('--num_epoches', default=100000, type=int)
-    parser.add_argument('--learning_rate', default=1e-3)
+    parser.add_argument('--learning_rate', default=1e-3, type=float)
     parser.add_argument('--rnn_size', default=200)
     parser.add_argument('--image_width', default=20)
     parser.add_argument('--image_height', default=20)
@@ -36,9 +36,10 @@ def main():
     parser.add_argument('--tensorboard_dir', default='./summary/one_shot_learning')
     args = parser.parse_args()
 
-    global ckpt
+    global ckpt, save_path
     model_name = args.model + '-MemorySize' + str(args.memory_size)
-    ckpt = tf.train.get_checkpoint_state(args.save_dir + '/' + model_name)
+    save_path = args.save_dir + '/' + model_name
+    ckpt = tf.train.get_checkpoint_state(save_path)
     if args.restore_training:
         print("Restore model from: {}".format(ckpt.model_checkpoint_path))
 
@@ -92,8 +93,8 @@ def train(args):
 
             # Save model
 
-            if b % 5000 == 0 and b > 0:
-                saver.save(sess, args.save_dir + '/' + args.model + '/model.tfmodel', global_step=b)
+            if b % 5000 == 0:
+                saver.save(sess, save_path + '/model.tfmodel', global_step=b)
 
             # Train
 
