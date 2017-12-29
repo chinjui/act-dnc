@@ -10,6 +10,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', default="train")
     parser.add_argument('--restore_training', action='store_true')
+    parser.add_argument('--no_save_model', action='store_true')
     parser.add_argument('--debug', default=False)
     parser.add_argument('--label_type', default="one_hot", help='one_hot or five_hot')
     parser.add_argument('--n_classes', default=5, type=int)
@@ -37,7 +38,7 @@ def main():
     args = parser.parse_args()
 
     global ckpt, save_path
-    model_name = args.model + '-MemorySize' + str(args.memory_size)
+    model_name = args.model + '-MemorySize' + str(args.memory_size) + '-%dclasses' % args.n_classes
     save_path = args.save_dir + '/' + model_name
     ckpt = tf.train.get_checkpoint_state(save_path)
     if args.restore_training:
