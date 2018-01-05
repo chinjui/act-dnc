@@ -18,7 +18,7 @@ def main():
     parser.add_argument('--augment', default=True)
     parser.add_argument('--model', default="LSTM", help='LSTM, MANN, MANN2 or NTM')
     parser.add_argument('--read_head_num', default=4)
-    parser.add_argument('--batch_size', default=16)
+    parser.add_argument('--batch_size', default=16, type=int)
     parser.add_argument('--num_epoches', default=100000, type=int)
     parser.add_argument('--learning_rate', default=1e-3, type=float)
     parser.add_argument('--rnn_size', default=200)
@@ -35,6 +35,7 @@ def main():
     parser.add_argument('--clip_value', default=10)
     parser.add_argument('--save_dir', default='./save/one_shot_learning')
     parser.add_argument('--tensorboard_dir', default='./summary/one_shot_learning')
+    parser.add_argument('--sample_strategy', default='random', help='random, uniform, or rotate')
     args = parser.parse_args()
 
     global ckpt, save_path
@@ -94,13 +95,14 @@ def train(args):
 
             # Save model
 
-            if b % 5000 == 0:
+            if b % 5000 == 0 and not args.no_save_model:
                 saver.save(sess, save_path + '/model.tfmodel', global_step=b)
 
             # Train
 
             x_image, x_label, y = data_loader.fetch_batch(args.n_classes, args.batch_size, args.seq_length,
                                                           type='train',
+                                                          sample_strategy=args.sample_strategy,
                                                           augment=args.augment,
                                                           label_type=args.label_type)
             feed_dict = {model.x_image: x_image, model.x_label: x_label, model.y: y}

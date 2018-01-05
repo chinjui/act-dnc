@@ -127,34 +127,41 @@ class NTMOneShotLearningModel():
             from dnc import dnc
 
             # main dnc
-            access_config = {
-                "memory_size": args.memory_size,
-                "word_size": args.memory_vector_dim,
-                "num_reads": args.read_head_num,
-                "num_writes": args.write_head_num,
-            }
-            controller_config = {
-                "hidden_size": args.rnn_size,
-            }
-            clip_value = args.clip_value
-            main_dnc = dnc.DNC(access_config, controller_config, args.output_dim, clip_value)
+            with tf.variable_scope('act_wrapper'):
+                access_config = {
+                    "memory_size": args.memory_size,
+                    "word_size": args.memory_vector_dim,
+                    "num_reads": args.read_head_num,
+                    "num_writes": args.write_head_num,
+                }
+                controller_config = {
+                    "hidden_size": args.rnn_size,
+                }
+                clip_value = args.clip_value
+                main_dnc = dnc.DNC(access_config,
+                                   controller_config,
+                                   args.output_dim,
+                                   clip_value,
+                                   name='main_dnc')
 
             # auxiliary dnc
             # use memory_vector_dim as aux's output size
             # so that info does not lose when communicating with main dnc
-            aux_access_config = {
-                "memory_size": 8,
-                "word_size": args.memory_vector_dim,
-                "num_reads": 1,
-                "num_writes": 1
-            }
-            aux_controller_config = {
-                "hidden_size": args.rnn_size,
-            }
-            aux_dnc = dnc.DNC(aux_access_config,
-                              aux_controller_config,
-                              args.memory_vector_dim,
-                              clip_value)
+            with tf.variable_scope('act_wrapper'):
+                aux_access_config = {
+                    "memory_size": 8,
+                    "word_size": args.memory_vector_dim,
+                    "num_reads": 1,
+                    "num_writes": 1
+                }
+                aux_controller_config = {
+                    "hidden_size": args.rnn_size,
+                }
+                aux_dnc = dnc.DNC(aux_access_config,
+                                  aux_controller_config,
+                                  args.memory_vector_dim,
+                                  clip_value,
+                                  name='aux_dnc')
 
             cell = ACTWrapper(main_dnc, aux_dnc, ponder_limit=10)
         else:
@@ -203,7 +210,7 @@ class NTMOneShotLearningModel():
         self.learning_loss_summary = tf.summary.scalar('learning_loss', self.learning_loss)
 
         """ ponder loss """
-        if args.model[:3] == 'ACT':
+        if 'ACT' in args.model:
             time_penalty = 0.001
             self._ponder_loss = time_penalty * cell.get_ponder_cost(args.seq_length)
             self.learning_loss += self._ponder_loss

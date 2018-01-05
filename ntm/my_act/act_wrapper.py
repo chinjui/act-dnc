@@ -31,8 +31,8 @@ def dnc_read(inputs, aux_output, cell, previous_state):
         read words: read vectors from memory
         state
     """
-
-    with tf.variable_scope(tf.get_variable_scope(), reuse=tf.AUTO_REUSE):
+    scope_name = 'main_dnc/memory_access'
+    with tf.variable_scope(scope_name, reuse=tf.AUTO_REUSE):
         # TODO remember to use new controller state at next time step
         # previous states
         prev_access_output = previous_state.access_output
@@ -106,6 +106,8 @@ class ACTWrapper(rnn.RNNCell):
         self._ponder_steps = []
         self._remainders = []
 
+        self._main_dnc_not_created = True
+
     @property
     def state_size(self):
         return (self._main_dnc.state_size,
@@ -163,6 +165,12 @@ class ACTWrapper(rnn.RNNCell):
             aux_zero_state = self._aux_dnc.initial_state(batch_size)
             main_zero_output = tf.fill([batch_size, self._main_dnc.output_size[0]], tf.constant(0.0, tf.float32))
             aux_zero_output = tf.fill([batch_size, self._aux_dnc.output_size[0]], tf.constant(0.0, tf.float32))
+
+            # pre-create variable if has not created
+            if self._main_dnc_not_created:
+                self._main_dnc_not_created = False
+                main_inputs = tf.concat([inputs_and_one, batch_flatten(aux_zero_output)], 1)
+                self._main_dnc(main_inputs, main_zero_state)
 
             def cond(finished, *_):
                 return tf.reduce_any(tf.logical_not(finished))

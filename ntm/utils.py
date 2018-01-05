@@ -2,6 +2,7 @@ import numpy as np
 import os
 from PIL import Image
 from PIL import ImageOps
+import sys
 # from skimage import io
 # from skimage import transform
 # from skimage import util
@@ -71,6 +72,16 @@ class OmniglotDataLoader:
                    for i in range(batch_size)])
             for i in range(batch_size):
                 np.random.shuffle(seq[i, :])
+        elif sample_strategy == 'rotate':       # #(sample) per class are equal 0, 1, 2, 3, 4, 0, 1, 2, 3, 4...
+            rotate_times = (seq_length // n_classes) * batch_size
+            seq = np.array(list(range(n_classes)) * rotate_times)
+            for i in range(rotate_times):
+                np.random.shuffle(seq[n_classes * i: n_classes * (i + 1)])
+            seq = seq.reshape((batch_size, seq_length))
+        else:
+            raise ValueError('No sample_strategy `%s`' % sample_strategy)
+        print(seq)
+
         self.rand_rotate_init(n_classes, batch_size)
         seq_pic = [[self.augment(data[classes[i][j]][np.random.randint(0, len(data[classes[i][j]]))],
                                  batch=i, c=j,
