@@ -65,6 +65,7 @@ class DNC(snt.RNNCore):
       self._controller = snt.LSTM(**controller_config)
       self._access = access.MemoryAccess(**access_config)
 
+    self._access_config = access_config
     self._access_output_size = np.prod(self._access.output_size.as_list())
     self._output_size = output_size
     self._clip_value = clip_value or 0
@@ -140,3 +141,49 @@ class DNC(snt.RNNCore):
   @property
   def output_size(self):
     return self._output_size
+
+  def get_memory_kl_divergence(self, divergence_type):
+    """
+    calculate D_kl(P || Q) over each memory cell pair
+    formula:
+        Average(P(i) * (log(P(i) / Q(i)))
+    """
+    if divergence_type == None:
+        return tf.constant(0)
+    elif divergence_type == 'KL':
+        raise ValueError('KL-divergence will not work for memory.')
+        kl_divergences = []
+        memory_size = self._access_config['memory_size']
+        memory = self._access._memory
+        word_sum = tf.reduce_sum(memory, axis=2, keep_dims=True)
+        memory /= word_sum  # make words sum to 1
+        memory = tf.Print(
+                input_=memory,
+                data=[memory],
+                message="memory: ",
+                summarize=30)
+        for i in range(memory_size):
+          prob_p = memory[:, i, None, :]
+          for j in range(memory_size):
+            if i != j:
+              prob_q = memory[:, j, None, :]
+              one_kl = tf.reduce_mean(tf.reduce_sum(prob_p * tf.log(prob_p / prob_q), axis=2))
+              kl_divergences.append(one_kl)
+
+        return tf.reduce_mean(tf.stack(kl_divergences))
+    elif divergence_type == 'CosineSimilarity':
+        cosine_similarities = []
+        memory_size = self._access_config['memory_size']
+        memory = self._access._memory
+        word_squared_sum = tf.reduce_sum(tf.square(memory), axis=2, keep_dims=True)
+        memory /= word_squared_sum  # make words sum to 1
+        for i in range(memory_size):
+            a = memory[:, i, None, :]
+            for j in range(i + 1, memory_size):
+                b = memory[:, j, None, :]
+                one_cosine_similarity = tf.reduce_mean(tf.reduce_sum(a * b, axis=2))
+                cosine_similarities.append(one_cosine_similarity)
+
+        return tf.reduce_mean(tf.stack(cosine_similarities))
+    else:
+        raise ValueError('No divergence_type `%s`' % divergence_type)

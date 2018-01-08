@@ -26,7 +26,7 @@ def main():
     parser.add_argument('--image_height', default=20)
     parser.add_argument('--rnn_num_layers', default=1)
     parser.add_argument('--memory_size', default=128, type=int)
-    parser.add_argument('--memory_vector_dim', default=40)
+    parser.add_argument('--memory_vector_dim', default=40, type=int)
     parser.add_argument('--shift_range', default=1, help='Only for model=NTM')
     parser.add_argument('--write_head_num', default=1, help='Only for model=NTM. For MANN #(write_head) = #(read_head)')
     parser.add_argument('--test_batch_num', default=100)
@@ -36,12 +36,16 @@ def main():
     parser.add_argument('--save_dir', default='./save/one_shot_learning')
     parser.add_argument('--tensorboard_dir', default='./summary/one_shot_learning')
     parser.add_argument('--sample_strategy', default='random', help='random, uniform, or rotate')
+    parser.add_argument('--divergence_loss', default=None, help='`KL` or `CosineSimilarity`')
     args = parser.parse_args()
 
     global ckpt, save_path
     model_name = args.model + '-MemorySize' + str(args.memory_size) + '-%dclasses' % args.n_classes
+    if args.divergence_loss is not None:
+        model_name += '-withDivergenceLoss'
     save_path = args.save_dir + '/' + model_name
     ckpt = tf.train.get_checkpoint_state(save_path)
+    print("model name: {}".format(model_name))
     if args.restore_training:
         print("Restore model from: {}".format(ckpt.model_checkpoint_path))
 

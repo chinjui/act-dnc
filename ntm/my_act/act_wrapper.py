@@ -92,7 +92,7 @@ def dnc_read(inputs, aux_output, cell, previous_state):
 class ACTWrapper(rnn.RNNCell):
     """Adaptive Computation Time wrapper (based on https://arxiv.org/abs/1603.08983)"""
 
-    def __init__(self, main_dnc, aux_dnc, ponder_limit=100, epsilon=0.01, init_halting_bias=1.0, reuse=None):
+    def __init__(self, main_dnc, aux_dnc, ponder_limit=100, epsilon=0.01, init_halting_bias=1.0, reuse=None, divergence_type=None):
         self._main_dnc = main_dnc
         self._aux_dnc = aux_dnc
         self._ponder_limit = ponder_limit
@@ -105,8 +105,10 @@ class ACTWrapper(rnn.RNNCell):
 
         self._ponder_steps = []
         self._remainders = []
+        self._memory_divergences = []
 
         self._main_dnc_not_created = True
+        self._divergence_type = divergence_type
 
     @property
     def state_size(self):
@@ -141,6 +143,11 @@ class ACTWrapper(rnn.RNNCell):
             batch_size = tf.cast(tf.shape(self._remainders[0])[0], stacked_remainders.dtype)
             self._ponder_cost_op = tf.reduce_sum(stacked_remainders) / batch_size
         return self._ponder_cost_op
+
+    def get_memory_divergence_loss(self):
+        if len(self._memory_divergences) == 0:
+            raise RuntimeError("memory divergence loss should be invoked after all call()'s")
+        return tf.reduce_mean(tf.stack(self._memory_divergences))
 
     def __call__(self, inputs, state, scope=None):
         # with _checked_scope(self, scope or "act_wrapper", reuse=self._reuse):
@@ -242,5 +249,6 @@ class ACTWrapper(rnn.RNNCell):
 
             self._ponder_steps.append(all_ponder_steps)
             self._remainders.append(all_remainders)
+            self._memory_divergences.append(self._main_dnc.get_memory_kl_divergence(self._divergence_type))
 
             return final_output, final_state

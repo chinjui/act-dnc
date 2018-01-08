@@ -163,7 +163,7 @@ class NTMOneShotLearningModel():
                                   clip_value,
                                   name='aux_dnc')
 
-            cell = ACTWrapper(main_dnc, aux_dnc, ponder_limit=10)
+            cell = ACTWrapper(main_dnc, aux_dnc, ponder_limit=10, divergence_type=args.divergence_loss)
         else:
             raise Exception('Unknown model: `{}`'.format(args.model))
 
@@ -218,6 +218,12 @@ class NTMOneShotLearningModel():
             self.mean_ponder_steps = tf.reduce_mean(self.ponder_steps)
         else:
             self.mean_ponder_steps = tf.constant(0)
+
+        """ memory divergence loss """
+        if args.model == 'MY-ACT':
+            if args.divergence_loss is not None:
+                divergence_penalty = 0.001
+                self.learning_loss += cell.get_memory_divergence_loss() * divergence_penalty
 
         with tf.variable_scope('optimizer'):
             self.optimizer = tf.train.AdamOptimizer(learning_rate=args.learning_rate)

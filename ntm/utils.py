@@ -80,7 +80,6 @@ class OmniglotDataLoader:
             seq = seq.reshape((batch_size, seq_length))
         else:
             raise ValueError('No sample_strategy `%s`' % sample_strategy)
-        print(seq)
 
         self.rand_rotate_init(n_classes, batch_size)
         seq_pic = [[self.augment(data[classes[i][j]][np.random.randint(0, len(data[classes[i][j]]))],

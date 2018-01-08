@@ -139,6 +139,7 @@ class MemoryAccess(snt.RNNCore):
         address=write_weights,
         reset_weights=inputs['erase_vectors'],
         values=inputs['write_vectors'])
+    self._memory = memory   # to compute memory KL-divergence
 
     linkage_state = self._linkage(write_weights, prev_state.linkage)
 
@@ -316,3 +317,12 @@ class MemoryAccess(snt.RNNCore):
   def output_size(self):
     """Returns the output shape."""
     return tf.TensorShape([self._num_reads, self._word_size])
+
+  def initial_state(self, batch_size, dtype=tf.float32):
+    batch_size = int(batch_size)
+    return AccessState(
+        memory=tf.fill([batch_size, self._memory_size, self._word_size], 1e-6),
+        read_weights=tf.zeros([batch_size, self._num_reads, self._memory_size]),
+        write_weights=tf.zeros([batch_size, self._num_writes, self._memory_size]),
+        linkage=self._linkage.initial_state(batch_size, dtype),
+        usage=self._freeness.initial_state(batch_size, dtype))
